@@ -1,0 +1,144 @@
+#!/usr/bin/python
+
+import sys, argparse
+import OpenSSL
+
+mainParser = argparse.ArgumentParser()
+subparsers = mainParser.add_subparsers()
+
+##
+# Create a Certificate Authority / Intermediate
+##
+createParser = subparsers.add_parser('create', help='Create a new Certificate Authority (CA).')
+createParser.add_argument('-cn', metavar='<common name>', help='The common name specified in our new CA / Intermediate certificate.', required=True)
+createParser.add_argument('-k', metavar='<key>', help='Private key (in PEM-format) that you wish to use as the CA\'s key. Optionally, if you don\'t specify this, a new key will be generated for you.')
+createParser.add_argument('-lt', metavar='<lifetime in days>', default=365, help='The Certificate will be valid for the specified number of days. Defaults to 365 days (a year).', type=int)
+createParser.add_argument('-pc', metavar='<certificate>', help='Use to create an Intermediate Certificate Authority. If a parent key is not specified (by -pk), then we will try to read it from this file as well.')
+createParser.add_argument('-pk', metavar='<key>', help='Use to create an Intermediate Certificate Authority.')
+createParser.add_argument('-pl', metavar='<path length>', help='How many intermediate CA\'s can be chained to sign certificates on our CA\'s behalf.', type=int)
+createParser.add_argument('-s', metavar='<keysize>', default=4096, help='If no private key is specified (using -k), a new one will be generated using this keysize. Defaults to 4096 bit.', type=int)
+createParser.add_argument('-serial', metavar='<serial>', default=1, help='Serial number for the certificate. Defaults to 1.', type=int)
+
+def create(args):
+
+    if args.k is None:
+        # Generate a new keypair
+        key = OpenSSL.crypto.PKey()
+        key.generate_key(OpenSSL.crypto.TYPE_RSA, args.s)
+    else:
+        # Load keypair
+        key_filename = args.k
+        key = OpenSSL.crypto.load_privatekey(OpenSSL.crypto.FILETYPE_PEM, file(key_filename).read())
+
+    if args.pc:
+        # Load parent CA keypair
+        crt_filename = args.pc
+        key_filename = args.pk
+        if args.pk is None:
+            key_filename = args.pc
+        parent_crt = OpenSSL.crypto.load_certificate(OpenSSL.crypto.FILETYPE_PEM, file(crt_filename).read())
+        parent_key = OpenSSL.crypto.load_privatekey(OpenSSL.crypto.FILETYPE_PEM, file(key_filename).read())
+
+    # Generate our CA / Intermediate certificate
+    ca = OpenSSL.crypto.X509()
+    ca.set_version(3)
+    ca.set_serial_number(args.serial)
+    ca.get_subject().CN = args.cn
+    ca.gmtime_adj_notBefore(0)
+    ca.gmtime_adj_notAfter(24 * 60 * 60 * args.lt)
+    ca.set_pubkey(key)
+    ca.add_extensions([
+        OpenSSL.crypto.X509Extension("keyUsage", True, "keyCertSign, cRLSign"),
+        OpenSSL.crypto.X509Extension("subjectKeyIdentifier", False, "hash", subject=ca),
+    ])
+
+    if args.pl is not None:
+        # Add basicConstraints extension with path length
+        ca.add_extensions([
+            OpenSSL.crypto.X509Extension("basicConstraints", True, "CA:TRUE, pathlen:%d" % args.pl),
+        ])
+    else:
+        # Add basicConstraints extension without path length
+        ca.add_extensions([
+            OpenSSL.crypto.X509Extension("basicConstraints", True, "CA:TRUE")
+        ])
+
+    if args.pc:
+        # Set our parent CA as the Issuer and use its key to sign our new certificate
+        ca.set_issuer(parent_crt.get_subject())
+        ca.sign(parent_key, "sha256")
+    else:
+        # Set our new certificate as its own issuer, and self-sign it.
+        ca.set_issuer(ca.get_subject())
+        ca.sign(key, "sha256")
+
+    # And were done.
+    # Output the keypair and the certificate of our CA / Intermediate.
+    print OpenSSL.crypto.dump_privatekey(OpenSSL.crypto.FILETYPE_PEM, key)
+    print OpenSSL.crypto.dump_certificate(OpenSSL.crypto.FILETYPE_PEM, ca)
+
+createParser.set_defaults(function=create)
+
+
+##
+# Sign a Certificate
+##
+signCertificateParser = subparsers.add_parser('sign-certificate', help='Sign a keypair (optionally creating one), using your root or intermediate CA.')
+signCertificateParser.add_argument('-ca-c', metavar='<certificate>', help='The Certificate Authority certificate to use when signing our keypair. If a Certificate Authority key is not specified on its own (using -ca-k), then we will try to read it from this file as well.', required=True)
+signCertificateParser.add_argument('-ca-k', metavar='<key>', help='The Certificate Authority key to use when signing our keypair.')
+signCertificateParser.add_argument('-cn', metavar='<common name>', help='The common name specified in our new, signed, certificate. *Hint* This is usually the hostname (URL) of our web-server when using the target keypair for HTTPS.', required=True)
+signCertificateParser.add_argument('-k', metavar='<key>', help='Private key (in PEM-format) that you wish to sign. Optionally, if you don\'t specify this, a new key will be generated for you.')
+signCertificateParser.add_argument('-lt', metavar='<lifetime in days>', default=365, help='The Certificate will be valid for the specified number of days. Defaults to 365 days (a year).', type=int)
+signCertificateParser.add_argument('-s', metavar='<keysize>', default=4096, help='If no private key is specified (using -k), a new one will be generated using this keysize. Defaults to 4096 bit.', type=int)
+signCertificateParser.add_argument('-serial', metavar='<serial>', default=1000, help='Serial number for the certificate. Defaults to 1000.', type=int)
+
+def signCertificate(args):
+
+    # Load the CA / Intermediate certificate to use for our signing
+    ca_crt_filename = args.ca_c
+    ca_key_filename = args.ca_k
+    if args.ca_k is None:
+        ca_key_filename = args.ca_c
+    ca_crt = OpenSSL.crypto.load_certificate(OpenSSL.crypto.FILETYPE_PEM, file(ca_crt_filename).read())
+    ca_key = OpenSSL.crypto.load_privatekey(OpenSSL.crypto.FILETYPE_PEM, file(ca_key_filename).read())
+
+    if args.k:
+        # Load keypair
+        key_filename = args.k
+        key = OpenSSL.crypto.load_privatekey(OpenSSL.crypto.FILETYPE_PEM, file(args.k).read())
+    else:
+        # Generate key-pair
+        key = OpenSSL.crypto.PKey()
+        key.generate_key(OpenSSL.crypto.TYPE_RSA, args.s)
+
+    # Create and sign the certificate with our CAs key
+    crt = OpenSSL.crypto.X509()
+    crt.get_subject().CN = args.cn
+    crt.set_serial_number(args.serial)
+    crt.gmtime_adj_notBefore(0)
+    crt.gmtime_adj_notAfter(24 * 60 * 60 * args.lt)
+    crt.set_pubkey(key)
+    crt.set_issuer(ca_crt.get_subject())
+    crt.sign(ca_key, "sha256")
+
+    # And were done.
+    # Output the keypair and the certificate.
+    print OpenSSL.crypto.dump_privatekey(OpenSSL.crypto.FILETYPE_PEM, key)
+    print OpenSSL.crypto.dump_certificate(OpenSSL.crypto.FILETYPE_PEM, crt)
+
+signCertificateParser.set_defaults(function=signCertificate)
+
+
+##
+# Now parse command line arguments and follow through
+##
+args = mainParser.parse_args(sys.argv[1:])
+
+if len(sys.argv) < 2:
+    # Show the usage screen
+    mainParser.print_help()
+    sys.exit(1)
+
+# Run the specified command
+args.function(args)
+
