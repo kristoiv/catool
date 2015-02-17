@@ -119,6 +119,11 @@ def signCertificate(args):
     crt.gmtime_adj_notAfter(24 * 60 * 60 * args.lt)
     crt.set_pubkey(key)
     crt.set_issuer(ca_crt.get_subject())
+
+    crt.add_extensions([
+        OpenSSL.crypto.X509Extension("extendedKeyUsage", True, "serverAuth,clientAuth"),
+    ])
+
     crt.sign(ca_key, "sha256")
 
     # And were done.
@@ -127,6 +132,41 @@ def signCertificate(args):
     print OpenSSL.crypto.dump_certificate(OpenSSL.crypto.FILETYPE_PEM, crt)
 
 signCertificateParser.set_defaults(function=signCertificate)
+
+
+##
+# Convert a Certificate from PEM to pkcs12
+##
+convertCertificateParser = subparsers.add_parser('convert-certificate', help='Convert certificate from PEM format to pkcs12.')
+convertCertificateParser.add_argument('-ca-c', metavar='<certificate>', help='The Certificate Authority certificate used when signing the keypair we are converting.', required=True)
+convertCertificateParser.add_argument('-c', metavar='<certificate>', help='The certificate we are converting. If a key is not specified on its own (using -k), then we will try to read it from this file as well.', required=True)
+convertCertificateParser.add_argument('-k', metavar='<key>', help='The key we are converting.')
+convertCertificateParser.add_argument('-p', metavar='<passphrase>', help='Passphrase for encrypting the keypairs.', required=False)
+
+def convertCertificate(args):
+
+    # Load the CA / Intermediate certificate to use for our signing
+    ca_crt_filename = args.ca_c
+    ca_crt = OpenSSL.crypto.load_certificate(OpenSSL.crypto.FILETYPE_PEM, file(ca_crt_filename).read())
+
+    crt_crt_filename = args.c
+    crt_key_filename = args.k
+    if args.k is None:
+        crt_key_filename = args.c
+    crt_crt = OpenSSL.crypto.load_certificate(OpenSSL.crypto.FILETYPE_PEM, file(crt_crt_filename).read())
+    crt_key = OpenSSL.crypto.load_privatekey(OpenSSL.crypto.FILETYPE_PEM, file(crt_key_filename).read())
+
+    passphrase = args.p
+
+    pkcs12 = OpenSSL.crypto.PKCS12()
+    pkcs12.set_ca_certificates([ca_crt])
+    pkcs12.set_certificate(crt_crt)
+    pkcs12.set_privatekey(crt_key)
+
+    # Lets export / print the result
+    print pkcs12.export(passphrase=passphrase, iter=4096)
+
+convertCertificateParser.set_defaults(function=convertCertificate)
 
 
 ##
