@@ -15,6 +15,7 @@
     sh$ catool create -cn myintermediateca.example.com -lt 1825 -pc myca.pem -serial 2 -pl 0 > myintermediateca.pem # Creates our intermediate CA using myca.pem as issuer and signer. Piped into the file myintermediateca.pem.
 
 
+
 ##### Use a CA or Intermediate CA to sign (create) a couple of certificates
 
     sh$ catool sign-certificate -cn mysite.example.com -ca-c myintermediateca.pem > server1.pem
@@ -22,6 +23,14 @@
     sh$ catool sign-certificate -cn mysite2.example.com -ca-c myintermediateca.pem -serial 1001 > server2.pem
 
     sh$ catool sign-certificate -cn mysite3.example.com -ca-c myintermediateca.pem -serial 1002 -s 2048 > server3.pem
+
+
+
+##### Convert a certificate and its key from PEM format into pkcs#12 format
+
+    sh$ catool convert-certificate -ca-c myca.pem -c mycertificateandkey.pem -p "Password" > mycertificateandkey.pfx
+
+
 
 ### Documentation
 
@@ -97,3 +106,17 @@
       -serial <serial>      Serial number for the certificate. Defaults to 1000.
 
 
+
+##### sh$ catool convert-certificate -h
+        usage: catool convert-certificate [-h] -ca-c <certificate> -c <certificate>
+                                  [-k <key>] [-p <passphrase>]
+
+        optional arguments:
+            -h, --help           show this help message and exit
+            -ca-c <certificate>  The Certificate Authority certificate used when signing
+                                 the keypair we are converting.
+            -c <certificate>     The certificate we are converting. If a key is not
+                                 specified on its own (using -k), then we will try to
+                                 read it from this file as well.
+            -k <key>             The key we are converting.
+            -p <passphrase>      Passphrase for encrypting the keypairs.
