@@ -107,7 +107,7 @@
 
 
 
-##### sh$ catool convert-certificate -h
+##### sh$ catool convert-certificate -h # (from PEM to pkcs12)
         usage: catool convert-certificate [-h] -ca-c <certificate> -c <certificate>
                                   [-k <key>] [-p <passphrase>]
 
